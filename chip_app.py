@@ -144,7 +144,7 @@ def run_gui(server):
         def load():
             web.load_uri(f"http://127.0.0.1:{server.port}/")
 
-        threading.Thread(target=_wait_then, args=(server, GLib.idle_add, load),
+        threading.Thread(target=_wait_then, args=(server, GLib, load),
                          daemon=True).start()
 
     app.connect("activate", on_activate)
@@ -155,9 +155,9 @@ def run_gui(server):
     return exit_status
 
 
-def _wait_then(server, when_ready, fn):
+def _wait_then(server, glib, fn):
     server.start()
-    GLib.idle_add(fn)
+    glib.idle_add(fn)
 
 
 # ---------------------------------------------------------------------------
