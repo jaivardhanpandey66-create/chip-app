@@ -102,6 +102,9 @@ header.top{
 .statusline{display:flex;gap:22px;font-size:11px;letter-spacing:2px;color:rgba(207,233,255,.6)}
 .statusline b{color:var(--green);font-weight:normal;animation:blink 1.6s infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.statusline .badge{display:inline-flex;align-items:center;gap:6px}
+.statusline .badge em{font-style:normal;color:var(--amber);transition:color .3s}
+.statusline .badge[data-ok="1"] em{color:var(--green)}
 #clock{color:var(--cyan-dim)}
 
 main{display:grid;grid-template-columns:290px 1fr 320px;gap:14px;min-height:0}
@@ -298,6 +301,8 @@ body.plan .chat .who{color:var(--amber)}
     </div>
     <div class="statusline">
       <span><b>&#9679;</b>&nbsp;LINK ESTABLISHED</span>
+      <span class="badge" id="badge-mem" data-ok="0">MEM <em>OFF</em></span>
+      <span class="badge" id="badge-tel" data-ok="0">TEL <em>OFF</em></span>
       <span>MODEL <select id="model-sel"><option>…</option></select></span>
       <span id="clock">--:--:--</span>
     </div>
@@ -601,6 +606,25 @@ modelSel.addEventListener('change',()=>{
 
 sendBtn.addEventListener('click',chat);
 input.addEventListener('keydown',e=>{if(e.key==='Enter')chat();});
+
+/* ---------------- MEM / TEL link badges ---------------- */
+function setBadge(id,on){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.dataset.ok=on?'1':'0';
+  const em=el.querySelector('em');
+  if(em)em.textContent=on?'ON':'OFF';
+}
+async function pollLinks(){
+  try{
+    const r=await fetch('/api/stats');
+    if(!r.ok)return;
+    const lk=(await r.json()).links||{};
+    setBadge('badge-mem',!!lk.cortex);
+    setBadge('badge-tel',!!lk.stark);
+  }catch(e){}
+}
+pollLinks();setInterval(pollLinks,15000);
 
 /* ---------------- flash toast ---------------- */
 function flash(msg){
