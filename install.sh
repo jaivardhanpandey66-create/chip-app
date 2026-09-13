@@ -23,18 +23,20 @@ fi
 
 # ---- python deps ----------------------------------------------------------
 echo "Installing Python deps (openai)..."
-pip3 install --user --quiet openai || true
+pip3 install --user --quiet openai 2>/dev/null || \
+pip3 install --user --quiet --break-system-packages openai 2>/dev/null || \
+{ echo "pip failed — install manually:  pip3 install --user --break-system-packages openai"; exit 1; }
 
 # ---- native cores (optional) ----------------------------------------------
 if command -v g++ >/dev/null 2>&1; then
     echo "Building C++ core..."
-    ( cd server && ./build.sh )
+    ( cd server && chmod +x build.sh && ./build.sh )
 else
     echo "(skipping C++ core — no g++; pure-Python mode is fine)"
 fi
 if command -v cargo >/dev/null 2>&1; then
     echo "Building Rust core..."
-    ( cd server && ./build_rs.sh )
+    ( cd server && chmod +x build_rs.sh && ./build_rs.sh )
 else
     echo "(skipping Rust core — no cargo)"
 fi
@@ -44,6 +46,7 @@ DST="$HOME/.local/share/chip-app"
 mkdir -p "$DST" "$HOME/.local/share/icons/hicolor/scalable/apps" \
          "$HOME/.local/share/applications"
 
+rm -rf "$DST/server"
 cp -r "server" "$DST/server"
 cp chip_app.py "$DST/chip_app.py"
 cp chip.svg    "$HOME/.local/share/icons/hicolor/scalable/apps/chip.svg"
