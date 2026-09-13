@@ -30,7 +30,7 @@ import threading
 import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs, urlencode
+from urllib.parse import urlparse, parse_qs, urlencode, quote
 import urllib.request
 
 try:
@@ -251,6 +251,90 @@ def make_client(model=None):
     if not key:
         raise RuntimeError("No API key. Set OPENROUTER_API_KEY or save it in %s" % CONFIG_DIR)
     return OpenAI(base_url=BASE_URL, api_key=key, timeout=180), model or MODEL
+
+
+# ---------------------------------------------------------------------------
+# Cortex memory bridge (optional) + Stark telemetry wiring
+# ---------------------------------------------------------------------------
+# CHIP links to the CORTEX memory server (cortex_web.py, port 8200) and the
+# STARK command center (stark_web.py, port 8100) when they are running.
+# Everything is opt-in and degrades silently: no Cortex/Stark ⇒ plain CHIP.
+
+CORTEX_URL = os.environ.get("CORTEX_URL", "http://127.0.0.1:8200").rstrip("/")
+STARK_URL = os.environ.get("STARK_URL", "http://127.0.0.1:8100").rstrip("/")
+MEMORY_RECALL_K = 4
+MEMORY_MIN_SCORE = 0.28
+
+_MEM_STATE = {"cortex": False, "cortex_at": 0.0, "stark": False, "stark_at": 0.0}
+
+
+def _cortex_live():
+    now = time.time()
+    if now - _MEM_STATE["cortex_at"] > 30:
+        try:
+            with urllib.request.urlopen(CORTEX_URL + "/api/stats", timeout=0.8) as r:
+                _MEM_STATE["cortex"] = (r.status == 200)
+        except Exception:
+            _MEM_STATE["cortex"] = False
+        _MEM_STATE["cortex_at"] = now
+    return _MEM_STATE["cortex"]
+
+
+def _stark_live():
+    now = time.time()
+    if now - _MEM_STATE["stark_at"] > 30:
+        try:
+            with urllib.request.urlopen(STARK_URL + "/api/system", timeout=0.8) as r:
+                _MEM_STATE["stark"] = (r.status == 200)
+        except Exception:
+            _MEM_STATE["stark"] = False
+        _MEM_STATE["stark_at"] = now
+    return _MEM_STATE["stark"]
+
+
+def _cortex_call(rel, method="GET", payload=None, timeout=2.0):
+    url = CORTEX_URL + rel
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=data, method=method,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode() or "{}")
+
+
+def _memory_recall(text, k=MEMORY_RECALL_K):
+    """Search CORTEX for memories relevant to `text`. Returns a string like
+    '' (no memory) or a compact context block for the model."""
+    if not text or not _cortex_live():
+        return ""
+    try:
+        res = _cortex_call("/api/search?q=" + quote(text) + "&k=" + str(k))
+        hits = [h for h in res.get("results", [])
+                if h.get("score", 0.0) >= MEMORY_MIN_SCORE]
+        if not hits:
+            return ""
+        lines = "\n".join("- [%s] %s" % (h.get("source", "?"),
+                                         h.get("text", ""))[:500] for h in hits[:k])
+        return ("Relevant memories from your long-term store (CORTEX):\n" + lines)
+    except Exception:
+        return ""
+
+
+def _memory_remember(text, source="chip", tags=""):
+    if not text or not _cortex_live():
+        return
+    try:
+        _cortex_call("/api/remember", "POST",
+                     {"text": text, "source": source, "tags": tags})
+    except Exception:
+        pass
+
+
+def _memory_auto(chat_txt, reply_txt, mode):
+    """Persist one exchange to memory in a background thread (never blocks)."""
+    def store():
+        body = ("USER: %s\nCHIP: %s" % (chat_txt, reply_txt))[:800]
+        _memory_remember(body, source="chip", tags=mode)
+    threading.Thread(target=store, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -496,23 +580,113 @@ def tool_undo_edit(args):
 
 
 def tool_system_info(args):
-    info = {
-        "hostname": platform.node(),
-        "os": f"{platform.system()} {platform.release()}",
-        "python": platform.python_version(),
-        "arch": platform.machine(),
-        "cpu": platform.processor() or "unknown",
-    }
+    """System telemetry — pulls live STARK data when that server is running,
+    otherwise reads /proc directly (stdlib). Always available."""
+    def _read1(p):
+        try:
+            with open(p, errors="ignore") as f:
+                return f.read()
+        except OSError:
+            return ""
+
+    if _stark_live():
+        try:
+            d = json.loads(urllib.request.urlopen(
+                STARK_URL + "/api/system", timeout=1.5).read())
+            g = d.get("misc", {})
+            out = "System Information (STARK live):"
+            out += "\n  host: %s (%s %s %s)" % (
+                g.get("host", "?"), g.get("os", "?"),
+                g.get("machine", "?"), g.get("python", "?"))
+            out += "\n  cpu: %.0f%%  per-core: %s" % (
+                d["cpu"]["total"], d["cpu"]["cores"])
+            out += "\n  memory: %.0f%% used  swap: %s%%" % (
+                d["mem"]["pct"], round(100 * d["mem"]["swap_used"] /
+                                       d["mem"]["swap_total"], 1)
+                if d["mem"]["swap_total"] else 0.0)
+            out += "\n  disk /: %.0f%% used" % d["disk"]["pct"]
+            out += "\n  net: rx=%.1f KB/s  tx=%.1f KB/s  load: %s" % (
+                d["net"]["rx"] / 1024, d["net"]["tx"] / 1024, g.get("load", []))
+            if g.get("temps_c"):
+                out += "\n  cpu temp (hottest): %.1f C (%s zone(s))" % (
+                    g["temps_c"][0], len(g["temps_c"]))
+            if d.get("gpu"):
+                out += "\n  gpu: %s  %.0f%%  %d MB / %d MB" % (
+                    d["gpu"]["name"], d["gpu"]["pct"],
+                    d["gpu"]["used"] // 1048576, d["gpu"]["total"] // 1048576)
+            top = d.get("proc", [])[:5]
+            if top:
+                out += "\n  top procs: " + ", ".join(
+                    "%s %.0f%%" % (p["comm"], p["cpu"]) for p in top)
+            return out
+        except Exception:
+            pass  # fall through to the local /proc path
+
+    # local fallback (no STARK running)
+    mem = {}
+    for line in _read1("/proc/meminfo").splitlines():
+        k, _, v = line.partition(":")
+        mem[k] = int(v.strip().split()[0]) * 1024
+    mtt = mem.get("MemTotal", 0)
+    mav = mem.get("MemAvailable", mem.get("MemFree", 0))
     try:
-        import psutil
-        vm = psutil.virtual_memory()
-        info["memory"] = f"{vm.used / 2**30:.1f} / {vm.total / 2**30:.1f} GB ({vm.percent:.0f}%)"
-        du = psutil.disk_usage("/")
-        info["disk"] = f"{du.used / 2**30:.1f} / {du.total / 2**30:.1f} GB ({du.percent:.0f}%)"
-        info["cpu_usage"] = f"{psutil.cpu_percent(interval=0.3):.0f}%"
-    except ImportError:
-        pass
-    return "System Information:\n" + "\n".join(f"  {k}: {v}" for k, v in info.items())
+        v = os.statvfs("/")
+        dsk = round(100 * (v.f_blocks - v.f_bavail) / v.f_blocks, 1)
+    except OSError:
+        dsk = -1.0
+    cpu = ""
+    for line in _read1("/proc/stat").splitlines():
+        if line.startswith("cpu ") and len(line.split()) >= 5:
+            f = [int(x) for x in line.split()[1:]]
+            idle = f[3] + f[4]
+            cpu = "%.0f%%" % (100 * (1.0 - idle / sum(f)))
+            break
+    out = ["System Information:"]
+    out.append("  host: %s (%s)" % (platform.node(), platform.release()))
+    out.append("  memory: %s used / %s total" % (
+        _hfmt(mtt - mav), _hfmt(mtt)))
+    out.append("  cpu: %s" % cpu)
+    out.append("  disk /: %s" % ("%.1f%% used" % dsk if dsk >= 0 else "n/a"))
+    up = _read1("/proc/uptime").split()
+    if up:
+        out.append("  uptime: %s s" % round(float(up[0])))
+    la = _read1("/proc/loadavg").split()[:3]
+    out.append("  load: " + (" ".join(la) if la else "n/a"))
+    return "\n".join(out)
+
+
+def _hfmt(n):
+    if n >= 2**30:
+        return "%.1f GB" % (n / 2**30)
+    if n >= 2**20:
+        return "%.0f MB" % (n / 2**20)
+    return "%d B" % n
+
+
+def tool_memorize(args):
+    """Persist a fact to long-term memory (CORTEX)."""
+    text = (args.get("text") or "").strip()
+    if not text:
+        return "memorize requires a 'text' string."
+    if not _cortex_live():
+        return ("Cortex memory offline (start cortex_web.py on port 8200) — "
+                "nothing stored.")
+    try:
+        _cortex_call("/api/remember", "POST",
+                     {"text": text, "source": args.get("source", "chip"),
+                      "tags": args.get("tags", "")})
+        return "Saved to long-term memory."
+    except Exception as e:
+        return "Cortex store failed: %s" % e
+
+
+def tool_recall(args):
+    """Query long-term memory (CORTEX) for relevant remembered facts."""
+    q = (args.get("query") or "").strip()
+    if not q:
+        return "recall requires a 'query' string."
+    note = _memory_recall(q, int(args.get("k", 4)) or MEMORY_RECALL_K)
+    return note or "No matching memories found."
 
 
 def tool_git(args):
@@ -581,7 +755,7 @@ def tool_delegate(args):
 
 
 EDIT_CMDS = {"write_file", "edit_file", "append_file", "move_file", "copy_file",
-             "delete_file", "run_command", "undo_edit"}
+             "delete_file", "run_command", "undo_edit", "memorize"}
 GIT_READONLY = {"status", "log", "diff", "show", "blame", "remote", "branch", "stash"}
 
 
@@ -639,8 +813,13 @@ TOOLS = [
         ["source", "destination"]),
     _fn("delete_file", "Delete a file/directory. Requires force=true.",
         {"path": {"type": "string"}, "force": {"type": "boolean"}}, ["path"]),
-    _fn("system_info", "Get system info: hostname, OS, CPU, memory, disk.",
+    _fn("system_info", "Get live system info: host, OS, CPU per-core, memory, swap, disk, network, temps, GPU, top processes.",
         {}),
+    _fn("recall", "Query long-term memory (CORTEX) for remembered facts relevant to a query.",
+        {"query": {"type": "string"}, "k": {"type": "integer"}}, ["query"]),
+    _fn("memorize", "Persist a fact to long-term memory (CORTEX) so it is recalled in future conversations.",
+        {"text": {"type": "string"}, "source": {"type": "string"},
+         "tags": {"type": "string"}}, ["text"]),
     _fn("git", "Run a git command (status, log, diff, add, commit, checkout, etc).",
         {"subcommand": {"type": "string"}, "message": {"type": "string"},
          "paths": {"type": "array", "items": {"type": "string"}},
@@ -655,7 +834,7 @@ TOOLS_NODELEGATE = [t for t in TOOLS if t["function"]["name"] != "delegate"]
 TOOLS_READONLY = [t for t in TOOLS_NODELEGATE
                   if t["function"]["name"] in
                   {"read_file", "list_dir", "search_files", "grep", "web_fetch",
-                   "system_info", "git"}]
+                   "system_info", "recall", "git"}]
 TOOLS_SUB = list(TOOLS_READONLY)
 
 FUNCS = {
@@ -666,6 +845,7 @@ FUNCS = {
     "web_fetch": tool_web_fetch, "move_file": tool_move_file,
     "copy_file": tool_copy_file, "delete_file": tool_delete_file,
     "system_info": tool_system_info, "git": tool_git,
+    "recall": tool_recall, "memorize": tool_memorize,
     "undo_edit": tool_undo_edit, "delegate": tool_delegate,
 }
 
@@ -957,6 +1137,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json({
                 "native": True, "rust": RS_CORE, "rust_version": rsver,
                 "context_budget": CONTEXT_BUDGET, "model": MODEL,
+                "links": {"cortex": bool(_cortex_live()),
+                          "cortex_url": CORTEX_URL if _MEM_STATE["cortex"] else None,
+                          "stark": bool(_stark_live()),
+                          "stark_url": STARK_URL if _MEM_STATE["stark"] else None},
                 "cache": {"items": items.value, "bytes": by.value,
                           "hits": hits.value, "misses": miss.value,
                           "hit_rate": round(100 * hits.value / (hits.value + miss.value), 2)
@@ -968,6 +1152,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({
                     "native": False, "rust": RS_CORE, "rust_version": rsver,
                     "context_budget": CONTEXT_BUDGET, "model": MODEL,
+                    "links": {"cortex": bool(_cortex_live()),
+                              "cortex_url": CORTEX_URL if _MEM_STATE["cortex"] else None,
+                              "stark": bool(_stark_live()),
+                              "stark_url": STARK_URL if _MEM_STATE["stark"] else None},
                     "cache": {"items": len(_TTS_CACHE), "bytes": sum(len(v) for v in _TTS_CACHE.values()),
                               "hits": 0, "misses": 0, "hit_rate": 0.0},
                     "sessions": {"items": len(SESSIONS), "bytes": 0},
@@ -1065,9 +1253,13 @@ class Handler(BaseHTTPRequestHandler):
         msgs = env["messages"]
         msgs.append({"role": "user", "content": message})
         msgs = _trim_to_budget(msgs, CONTEXT_BUDGET)
+
+        recall_note = _memory_recall(message)
+        gen_msgs = msgs + ([{"role": "system", "content": recall_note}]
+                           if recall_note else [])
         env["messages"] = msgs
 
-        events = agent_generate(client, msgs, mode=mode, temperature=TEMPERATURE)
+        events = agent_generate(client, gen_msgs, mode=mode, temperature=TEMPERATURE)
 
         if not streaming:
             steps = []
@@ -1081,7 +1273,12 @@ class Handler(BaseHTTPRequestHandler):
                     answer = ev["answer"]
                 elif ev["type"] == "error":
                     err = ev["error"]
+            env["messages"] = (gen_msgs if not recall_note else
+                               [m for m in gen_msgs
+                                if m.get("content") != recall_note])
             _session_save(session_key, env)
+            if answer and not err:
+                _memory_auto(message, answer, mode)
             self._json({"answer": answer or "(no response)",
                         "steps": steps,
                         "session": session_key,
@@ -1101,6 +1298,7 @@ class Handler(BaseHTTPRequestHandler):
         def evt(kind, obj):
             self._sse_frame(kind, obj)
 
+        final_answer = ""
         try:
             evt("meta", {"session": session_key, "model": model, "mode": mode})
             for ev in events:
@@ -1112,13 +1310,19 @@ class Handler(BaseHTTPRequestHandler):
                                  "result": ev["result"], "index": ev["index"],
                                  "blocked": ev["blocked"]})
                 elif ev["type"] == "done":
+                    final_answer = ev["answer"]
                     evt("done", {"answer": ev["answer"], "steps": ev["steps"]})
                 elif ev["type"] == "error":
                     evt("error", {"error": ev["error"]})
         except (BrokenPipeError, ConnectionResetError):
             pass
         finally:
+            env["messages"] = (gen_msgs if not recall_note else
+                               [m for m in gen_msgs
+                                if m.get("content") != recall_note])
             _session_save(session_key, env)
+            if final_answer:
+                _memory_auto(message, final_answer, mode)
             try:
                 self._chunk(b"")
             except Exception:
