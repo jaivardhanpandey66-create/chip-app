@@ -92,8 +92,8 @@ def _import_webkit():
         gi.require_version("WebKit2", "4.1")
     except ValueError:
         gi.require_version("WebKit2", "4.0")
-    from gi.repository import Gtk, WebKit2  # noqa: F401
-    return Gtk, WebKit2
+    from gi.repository import Gtk, WebKit2, GLib  # noqa: F401
+    return Gtk, WebKit2, GLib
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +101,7 @@ def _import_webkit():
 # ---------------------------------------------------------------------------
 
 def run_gui(server):
-    Gtk, WebKit2 = _import_webkit()
+    Gtk, WebKit2, GLib = _import_webkit()
 
     app = Gtk.Application.new(APP_ID, 0)
     win = None
