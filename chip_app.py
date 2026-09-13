@@ -130,11 +130,7 @@ def run_gui(server):
         web = WebKit2.WebView()
         settings = web.get_settings()
         settings.set_enable_developer_extras(True)
-        settings.set_enable_mediastream(True)   # mic for voice-in
-        try:
-            settings.set_enable_media_stream(True)
-        except Exception:
-            pass
+        settings.set_enable_media_stream(True)   # mic for voice-in
 
         if hasattr(settings, "set_media_content_types_requiring_hardware_acceleration"):
             try:
