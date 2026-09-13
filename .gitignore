@@ -1,0 +1,9 @@
+# binaries & build output
+*.so
+*.dll
+*.o
+target/
+__pycache__/
+*.pyc
+# local state
+key

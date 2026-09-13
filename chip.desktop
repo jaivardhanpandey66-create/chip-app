@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=CHIP
+GenericName=AI Agent
+Comment=Holographic AI agent for your Linux machine
+Exec=python3 %INSTALL_DIR%/chip_app.py
+Icon=chip
+Terminal=false
+Categories=Utility;Development;Science;
+Keywords=AI;agent;assistant;hologram;
+StartupNotify=true

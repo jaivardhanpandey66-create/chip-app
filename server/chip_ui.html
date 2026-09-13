@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CHIP // J.A.R.V.I.S. Interface</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;800;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+:root{
+  --cyan:#00f7ff;
+  --cyan-dim:#00b6c9;
+  --amber:#ffb545;
+  --amber-soft:#ffc46b;
+  --magenta:#ff4fd8;
+  --green:#39ff9e;
+  --blue:#4d7bff;
+  --bg0:#01030a;
+  --bg1:#040a18;
+  --glass:rgba(6,18,36,.55);
+  --line:rgba(0,247,255,.28);
+  --font-body:'Share Tech Mono',Consolas,monospace;
+  --font-display:'Orbitron',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg0);
+  color:#cfe9ff;
+  font-family:var(--font-body);
+  overflow:hidden;
+  cursor:crosshair;
+}
+/* ---------- ambient background ---------- */
+#hud-canvas{position:fixed;inset:0;z-index:0}
+.vignette{
+  position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:
+    radial-gradient(120% 90% at 50% 40%, transparent 35%, rgba(1,3,10,.75) 82%, rgba(0,0,0,.95) 100%);
+}
+.scanlines{
+  position:fixed;inset:0;z-index:2;pointer-events:none;opacity:.14;
+  background:repeating-linear-gradient(0deg, rgba(255,255,255,.06) 0 1px, transparent 1px 3px);
+}
+.scan-sweep{
+  position:fixed;inset:-10% 0 auto 0;height:38vh;z-index:2;pointer-events:none;
+  background:linear-gradient(180deg, transparent, rgba(0,247,255,.06) 45%, rgba(0,247,255,.16) 50%, rgba(0,247,255,.06) 55%, transparent);
+  animation:sweep 9s linear infinite;
+}
+@keyframes sweep{0%{transform:translateY(-50vh)}100%{transform:translateY(150vh)}}
+.corner-frame{position:fixed;z-index:3;width:52px;height:52px;pointer-events:none;opacity:.8}
+.corner-frame.tl{top:12px;left:12px;border-top:2px solid var(--cyan);border-left:2px solid var(--cyan)}
+.corner-frame.tr{top:12px;right:12px;border-top:2px solid var(--cyan);border-right:2px solid var(--cyan)}
+.corner-frame.bl{bottom:12px;left:12px;border-bottom:2px solid var(--cyan);border-left:2px solid var(--cyan)}
+.corner-frame.br{bottom:12px;right:12px;border-bottom:2px solid var(--cyan);border-right:2px solid var(--cyan)}
+
+/* ---------- holo panel primitive ---------- */
+.holo{
+  position:relative;
+  background:linear-gradient(160deg, rgba(0,140,190,.10), rgba(6,18,36,.72) 60%, rgba(0,247,255,.07));
+  border:1px solid var(--line);
+  clip-path:polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+  box-shadow:
+    0 0 22px rgba(0,247,255,.10) inset,
+    0 0 18px rgba(0,247,255,.08);
+}
+.holo::before,.holo::after{content:"";position:absolute;width:10px;height:10px;pointer-events:none}
+.holo::before{top:0;left:0;border-top:2px solid var(--cyan);border-left:2px solid var(--cyan)}
+.holo::after{bottom:0;right:0;border-bottom:2px solid var(--cyan);border-right:2px solid var(--cyan)}
+.holo .tag{
+  position:absolute;top:8px;left:14px;font-family:var(--font-display);
+  font-size:9px;letter-spacing:3px;color:var(--cyan-dim);text-transform:uppercase;
+}
+.holo-title{
+  font-family:var(--font-display);font-weight:700;letter-spacing:4px;
+  font-size:11px;color:var(--cyan);text-transform:uppercase;
+  text-shadow:0 0 8px rgba(0,247,255,.8);
+  display:flex;align-items:center;gap:10px;
+}
+.holo-title::before{content:"";width:26px;height:1px;background:linear-gradient(90deg,transparent,var(--cyan))}
+.holo-title::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--cyan),transparent)}
+
+/* ---------- layout ---------- */
+#app{
+  position:relative;z-index:4;height:100vh;
+  display:grid;
+  grid-template-rows:auto 1fr auto;
+  gap:10px;padding:56px 18px 14px;
+}
+header.top{
+  display:flex;align-items:center;justify-content:space-between;gap:18px;
+}
+.brand{display:flex;align-items:baseline;gap:14px}
+.brand h1{
+  font-family:var(--font-display);font-weight:900;font-style:italic;
+  font-size:26px;letter-spacing:8px;color:var(--cyan);
+  text-shadow:0 0 12px rgba(0,247,255,.9), 0 0 42px rgba(0,247,255,.45);
+  animation:breathe 4s ease-in-out infinite;
+}
+@keyframes breathe{0%,100%{opacity:.92}50%{opacity:1}}
+.brand .sub{font-size:10px;letter-spacing:4px;color:var(--amber);text-transform:uppercase}
+.statusline{display:flex;gap:22px;font-size:11px;letter-spacing:2px;color:rgba(207,233,255,.6)}
+.statusline b{color:var(--green);font-weight:normal;animation:blink 1.6s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+#clock{color:var(--cyan-dim)}
+
+main{display:grid;grid-template-columns:290px 1fr 320px;gap:14px;min-height:0}
+
+/* ---------- left: ARC reactor ---------- */
+.left{display:flex;flex-direction:column;gap:14px;min-height:0}
+.orb-wrap{flex:0 0 290px;display:grid;place-items:center;position:relative;padding:22px}
+.arc{position:relative;width:228px;height:228px;display:grid;place-items:center}
+.arc .ring{position:absolute;border-radius:50%}
+.arc .r1{inset:0;border:2px dashed rgba(0,247,255,.45)}
+.arc .r2{inset:14px;border:2px solid rgba(255,181,69,.55);border-top-color:transparent;border-bottom-color:transparent;animation:spin 6s linear infinite}
+.arc .r3{inset:30px;border:1px dotted rgba(0,247,255,.4);animation:spin 14s linear infinite reverse}
+.arc .r4{inset:6px;border:1px solid rgba(0,247,255,.14);box-shadow:0 0 30px rgba(0,247,255,.25) inset}
+.arc .sweep{
+  inset:0;border-radius:50%;
+  background:conic-gradient(from 0deg, transparent 0deg, rgba(0,247,255,.55) 40deg, transparent 90deg);
+  -webkit-mask:radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+          mask:radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
+  animation:spin 2.6s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.arc .core{
+  width:92px;height:92px;border-radius:50%;position:relative;z-index:2;
+  display:grid;place-items:center;
+  background:
+    radial-gradient(circle at 50% 42%, #eaffff 0%, var(--cyan) 18%, rgba(0,120,190,.8) 52%, rgba(0,20,45,.95) 88%);
+  box-shadow:
+    0 0 26px rgba(0,247,255,.8), 0 0 80px rgba(0,247,255,.45),
+    inset 0 0 22px rgba(255,255,255,.55);
+  animation:corepulse 3s ease-in-out infinite;
+}
+@keyframes corepulse{0%,100%{box-shadow:0 0 26px rgba(0,247,255,.8),0 0 80px rgba(0,247,255,.4),inset 0 0 22px rgba(255,255,255,.55)}50%{box-shadow:0 0 40px rgba(0,247,255,1),0 0 120px rgba(0,247,255,.65),inset 0 0 30px rgba(255,255,255,.8)}}
+.arc .core .core-in{
+  width:58px;height:58px;border-radius:50%;border:2px solid rgba(0,10,30,.9);
+  display:grid;place-items:center;font-family:var(--font-display);
+  font-size:15px;font-weight:800;color:#021018;letter-spacing:1px;
+}
+.arc .shockwave{position:absolute;border-radius:50%;border:1px solid rgba(0,247,255,.5);opacity:0;animation:none}
+.arc.sending .shockwave{animation:shock 1.4s ease-out infinite}
+@keyframes shock{0%{width:100px;height:100px;opacity:.8}100%{width:228px;height:228px;opacity:0}}
+.orbtxt{margin-top:14px;text-align:center;font-family:var(--font-display);letter-spacing:4px;color:var(--cyan);font-size:13px;text-shadow:0 0 10px rgba(0,247,255,.7)}
+.orbtxt small{display:block;margin-top:6px;font-family:var(--font-body);font-size:10px;letter-spacing:2px;color:rgba(207,233,255,.5)}
+
+.gauges{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.gauge{padding:10px 12px}
+.gauge .g-label{font-size:9px;letter-spacing:2px;color:rgba(207,233,255,.55);text-transform:uppercase}
+.gauge .g-bar{height:6px;margin-top:7px;background:rgba(0,247,255,.08);overflow:hidden}
+.gauge .g-fill{height:100%;width:40%;background:linear-gradient(90deg,var(--cyan-dim),var(--cyan));box-shadow:0 0 8px var(--cyan);transition:width 2s ease}
+.gauge .g-fill.hot{background:linear-gradient(90deg,#ff6a3d,var(--amber));box-shadow:0 0 8px var(--amber)}
+.gauge .g-val{margin-top:5px;font-size:10px;color:var(--amber-soft);text-align:right}
+
+.heartbeat{padding:14px;overflow:hidden}
+.heartbeat svg{width:100%;height:44px}
+.heartbeat path{stroke:var(--cyan);fill:none;stroke-width:1.4;filter:drop-shadow(0 0 4px var(--cyan))}
+
+/* ---------- center: chat ---------- */
+.chat.holo{display:flex;flex-direction:column;min-height:0;padding:14px 2px 0 0}
+.chat .feed{flex:1;overflow-y:auto;padding:26px 18px 10px;scrollbar-width:thin;scrollbar-color:rgba(0,247,255,.35) transparent}
+.msg{max-width:88%;margin:0 0 16px;animation:rise .4s ease both}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.msg .who{font-family:var(--font-display);font-size:9px;letter-spacing:3px;margin-bottom:5px;text-transform:uppercase}
+.msg.user{margin-left:auto;text-align:right}
+.msg.user .who{color:var(--amber)}
+.msg.bot .who{color:var(--cyan)}
+.msg .body{
+  display:inline-block;text-align:left;padding:10px 14px;font-size:14px;line-height:1.55;
+  white-space:pre-wrap;word-break:break-word;
+  background:linear-gradient(160deg,rgba(0,120,190,.14),rgba(4,12,28,.66));
+  border:1px solid var(--line);
+  clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
+}
+.msg.user .body{border-color:rgba(255,181,69,.45);box-shadow:0 0 16px rgba(255,181,69,.12) inset}
+.msg.bot .body{box-shadow:0 0 22px rgba(0,247,255,.14) inset}
+.msg .caret{color:var(--cyan);animation:blink .8s step-end infinite}
+.msg.typing .body{color:var(--cyan-dim)}
+.msg .err .body-style{border-color:var(--magenta)}
+
+/* ---------- right: telemetry ---------- */
+.right{display:flex;flex-direction:column;gap:14px;min-height:0}
+.tele{padding:14px}
+.tele .rows{margin-top:12px;display:grid;gap:8px}
+.tele .tr{display:grid;grid-template-columns:96px 1fr;gap:8px;align-items:center;font-size:11px}
+.tele .tr .k{color:rgba(207,233,255,.5);letter-spacing:1px}
+.tele .tr .v{color:var(--cyan);text-align:right;text-shadow:0 0 6px rgba(0,247,255,.5)}
+
+.toolfeed{padding:14px;flex:1;min-height:0;display:flex;flex-direction:column}
+.toolfeed .log{flex:1;overflow-y:auto;margin-top:12px;display:grid;gap:8px;align-content:start;scrollbar-width:thin;scrollbar-color:rgba(0,247,255,.35) transparent}
+.step{border:1px solid var(--line);padding:8px 10px;font-size:11px;line-height:1.4;background:rgba(0,120,190,.06);animation:rise .35s ease both}
+.step .s-head{display:flex;justify-content:space-between;gap:8px;color:var(--cyan);letter-spacing:1px}
+.step .s-n{font-family:var(--font-display);font-size:9px;color:var(--magenta)}
+.step pre{margin-top:6px;color:rgba(207,233,255,.72);white-space:pre-wrap;word-break:break-word;max-height:60px;overflow:hidden}
+.step .s-args{color:var(--amber-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty-hint{color:rgba(207,233,255,.28);font-size:11px;letter-spacing:1px}
+
+/* ---------- footer: input ---------- */
+footer.input{padding:10px 4px 2px;display:flex;gap:12px;align-items:center}
+.tf-wrap{flex:1;position:relative}
+.tf-wrap::before{
+  content:"";position:absolute;inset:-1px;pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--cyan) 12%,var(--cyan) 88%,transparent);
+  -webkit-mask:linear-gradient(#000,#000) content-box,linear-gradient(#000,#000);
+  -webkit-mask-composite:xor;mask-composite:exclude;padding:1px;
+  animation:borderpulse 3s ease-in-out infinite;
+}
+@keyframes borderpulse{0%,100%{opacity:.5}50%{opacity:1}}
+#input{
+  width:100%;background:rgba(3,12,26,.85);border:none;outline:none;
+  color:var(--cyan);font-family:var(--font-body);font-size:16px;
+  letter-spacing:1px;padding:15px 18px;caret-color:var(--cyan);
+  text-shadow:0 0 8px rgba(0,247,255,.5);
+}
+#input::placeholder{color:rgba(207,233,255,.28)}
+#send{
+  width:118px;padding:15px 0;text-align:center;cursor:pointer;
+  font-family:var(--font-display);font-size:12px;font-weight:700;letter-spacing:3px;
+  color:var(--bg0);background:linear-gradient(120deg,var(--cyan),#7df9ff);
+  border:none;clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
+  box-shadow:0 0 22px rgba(0,247,255,.5);transition:all .2s;text-transform:uppercase;
+}
+#send:hover{box-shadow:0 0 38px rgba(0,247,255,.9);filter:brightness(1.15)}
+#send:disabled{opacity:.4;cursor:not-allowed}
+#send.sending{color:#fff;background:linear-gradient(120deg,var(--amber),#ff8a4d);box-shadow:0 0 22px rgba(255,181,69,.5)}
+
+#model-sel{
+  background:rgba(3,12,26,.85);color:var(--cyan);border:1px solid var(--line);
+  font-family:var(--font-body);font-size:10px;letter-spacing:1px;
+  padding:3px 6px;max-width:210px;clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px);
+  cursor:pointer;
+}
+#model-sel:focus{outline:none;box-shadow:0 0 12px rgba(0,247,255,.4)}
+#model-sel option{background:#04101f;color:#cfe9ff}
+
+.sec-btn{
+  width:74px;padding:15px 0;text-align:center;cursor:pointer;flex:0 0 auto;
+  font-family:var(--font-display);font-size:11px;font-weight:700;letter-spacing:2px;
+  color:var(--cyan);background:rgba(0,247,255,.06);
+  border:1px solid var(--line);text-transform:uppercase;
+  clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px);
+  box-shadow:0 0 14px rgba(0,247,255,.12) inset;transition:all .2s;
+}
+.sec-btn:hover{background:rgba(0,247,255,.14);box-shadow:0 0 22px rgba(0,247,255,.35) inset}
+.sec-btn.on{color:#021018;background:linear-gradient(120deg,var(--cyan),#7df9ff);box-shadow:0 0 22px rgba(0,247,255,.5)}
+#mic.listening{color:#021018;background:linear-gradient(120deg,var(--amber),#ff8a4d);box-shadow:0 0 26px rgba(255,181,69,.8);animation:micpulse .9s ease-in-out infinite}
+@keyframes micpulse{0%,100%{box-shadow:0 0 18px rgba(255,181,69,.4)}50%{box-shadow:0 0 36px rgba(255,181,69,.95)}}
+
+.flash{
+  position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:9;
+  font-family:var(--font-body);font-size:12px;letter-spacing:2px;color:var(--amber-soft);
+  padding:9px 18px;background:rgba(4,12,28,.88);border:1px solid rgba(255,181,69,.5);
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
+  box-shadow:0 0 18px rgba(255,181,69,.25);animation:rise .25s ease both;text-transform:uppercase;
+}
+.flash.out{opacity:0;transition:opacity .4s}
+
+.modebox{
+  position:fixed;right:20px;bottom:16px;z-index:5;
+  display:flex;align-items:center;gap:10px;
+  font-family:var(--font-display);font-size:10px;letter-spacing:3px;text-transform:uppercase;
+  padding:8px 14px;cursor:pointer;user-select:none;
+  background:rgba(4,12,28,.6);border:1px solid var(--line);
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);
+  transition:all .25s;
+}
+.modebox .m-key{color:rgba(207,233,255,.4);font-size:9px}
+.modebox.build .m-state{color:var(--cyan);text-shadow:0 0 8px rgba(0,247,255,.8)}
+.modebox.plan .m-state{color:var(--amber);text-shadow:0 0 8px rgba(255,181,69,.8)}
+.modebox .m-dot{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);animation:blink 1.6s infinite}
+.modebox.plan .m-dot{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+body.plan #input{color:var(--amber-soft);caret-color:var(--amber);text-shadow:0 0 8px rgba(255,181,69,.4)}
+body.plan .tf-wrap::before{background:linear-gradient(90deg,transparent,var(--amber) 12%,var(--amber) 88%,transparent)}
+body.plan .chat .who{color:var(--amber)}
+
+@media (max-width:1100px){
+  main{grid-template-columns:1fr;grid-template-rows:auto 1fr auto}
+  .left{flex-direction:row;align-items:center}
+  .orb-wrap{flex:0 0 auto;transform:scale(.72)}
+  .gauges{display:none}
+}
+</style>
+</head>
+<body>
+<canvas id="hud-canvas"></canvas>
+<div class="vignette"></div>
+<div class="scanlines"></div>
+<div class="scan-sweep"></div>
+<div class="corner-frame tl"></div><div class="corner-frame tr"></div>
+<div class="corner-frame bl"></div><div class="corner-frame br"></div>
+
+<div id="app">
+  <header class="top">
+    <div class="brand">
+      <h1>CHIP</h1>
+      <span class="sub">// J.A.R.V.I.S. interface // online</span>
+    </div>
+    <div class="statusline">
+      <span><b>&#9679;</b>&nbsp;LINK ESTABLISHED</span>
+      <span>MODEL <select id="model-sel"><option>…</option></select></span>
+      <span id="clock">--:--:--</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="left">
+      <div class="holo orb-wrap">
+        <span class="tag">ARC reactor</span>
+        <div class="arc" id="arc">
+          <div class="ring r1"></div>
+          <div class="ring r2"></div>
+          <div class="ring r3"></div>
+          <div class="ring r4"></div>
+          <div class="ring sweep"></div>
+          <div class="shockwave"></div>
+          <div class="core"><div class="core-in">CHIP</div></div>
+        </div>
+        <div class="orbtxt">NEURAL CORE <small id="core-state">STANDBY</small></div>
+      </div>
+      <div class="holo gauges">
+        <div class="gauge">
+          <div class="g-label">CPU</div>
+          <div class="g-bar"><div class="g-fill" id="g-cpu"></div></div>
+          <div class="g-val" id="v-cpu">--%</div>
+        </div>
+        <div class="gauge">
+          <div class="g-label">MEM</div>
+          <div class="g-bar"><div class="g-fill" id="g-mem"></div></div>
+          <div class="g-val" id="v-mem">--%</div>
+        </div>
+      </div>
+      <div class="holo heartbeat">
+        <span class="tag">encoded uplink</span>
+        <svg id="beat" viewBox="0 0 300 44" preserveAspectRatio="none">
+          <path id="beat-path" d="M0,22 L60,22 L72,22 L80,4 L92,40 L100,22 L140,22 L152,22 L160,8 L172,38 L180,22 L240,22 L250,22 L258,14 L266,30 L274,22 L300,22"/>
+        </svg>
+      </div>
+    </section>
+
+    <section class="chat holo">
+      <div class="holo-title" style="padding:0 18px">conversation</div>
+      <div class="feed" id="feed"></div>
+    </section>
+
+    <section class="right">
+      <div class="holo tele">
+        <span class="tag" style="position:static">telemetry</span>
+        <div class="rows" id="tele"></div>
+      </div>
+      <div class="holo toolfeed">
+        <span class="tag" style="position:static">tool activity</span>
+        <div class="log" id="log"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="input">
+    <div class="tf-wrap">
+      <input id="input" placeholder="AWAITING INPUT, SIR…" autocomplete="off" spellcheck="false">
+    </div>
+    <button id="mic" class="sec-btn" title="Speak to CHIP">&#9677; mic</button>
+    <button id="send">&#9654; send</button>
+    <button id="voice" class="sec-btn" title="Toggle voice replies">vox</button>
+  </footer>
+</div>
+
+<div class="modebox build" id="modebox" title="Press TAB to toggle">
+  <span class="m-key">TAB</span>
+  <span class="m-dot"></span>
+  <span class="m-state" id="mode-state">BUILD MODE</span>
+</div>
+
+<script>
+/* ---------------- background: holo hex field + particles ---------------- */
+const cv=document.getElementById('hud-canvas'),g=cv.getContext('2d');
+let W,H,pts=[];
+function hexagon(x,y,r,fill){g.beginPath();for(let i=0;i<6;i++){const a=i*Math.PI/3-Math.PI/2;g[i?'lineTo':'moveTo'](x+r*Math.cos(a),y+r*Math.sin(a));}g.closePath();g.stroke();}
+function size(){W=cv.width=innerWidth;H=cv.height=innerHeight;pts=[];for(let i=0;i<46;i++)pts.push({x:Math.random()*W,y:Math.random()*H,z:Math.random()*.6+.2,vy:Math.random()*.25+.05});}
+size();addEventListener('resize',size);
+function bg(t){
+  g.clearRect(0,0,W,H);
+  g.strokeStyle='rgba(0,247,255,.07)';g.lineWidth=1;
+  const r=26;for(let y=0;y<H;y+=r*1.7){for(let x=0;x<W;x+=r*1.5){hexagon(x+(y%(r*3.4)?r*.75:0),y,r,false);}}
+  for(const p of pts){
+    p.y-=p.vy;if(p.y<-8)p.y=H+8;
+    g.beginPath();g.arc(p.x,p.y,1.6*p.z+.4,0,7);g.fillStyle=`rgba(0,247,255,${.12+.14*Math.sin(t/900+p.x)})`;g.fill();
+  }
+  const gx=W/2,gy=H*.42;
+  const gr=g.createRadialGradient(gx,gy,60,gx,gy,Math.max(W,H)*.55);
+  gr.addColorStop(0,'rgba(0,180,255,.05)');gr.addColorStop(1,'transparent');
+  g.fillStyle=gr;g.fillRect(0,0,W,H);
+}
+(function loop(t){bg(t);requestAnimationFrame(loop);})(0);
+
+/* ---------------- heartbeat trace ---------------- */
+const beatPath=document.getElementById('beat-path');
+(function({p}){const len=beatPath.getTotalLength();beatPath.style.strokeDasharray=len;beatPath.style.strokeDashoffset=-len;})({});
+(function animateBeat(t){
+  const len=beatPath.getTotalLength();
+  beatPath.setAttribute('stroke-dashoffset',(-(t/10)%len));
+  beatPath.setAttribute('stroke-dasharray',`${len*.25} ${len}`);
+  requestAnimationFrame(animateBeat);
+})(0);
+
+/* ---------------- clock + status ---------------- */
+const clock=document.getElementById('clock');
+setInterval(()=>{const d=new Date();clock.textContent=d.toTimeString().slice(0,8);},1000);
+
+/* ---------------- telemetry display ---------------- */
+const teleRows=[
+  ['PLATFORM',navigator.platform||'unknown'],
+  ['CORE TEMP','37.2 °C'],
+  ['POWER','4.3 GW'],
+  ['UPLINK','OPENROUTER'],
+  ['SESSION','—'],
+];
+function drawTele(session){
+  const box=document.getElementById('tele');box.innerHTML='';
+  teleRows[4][1]='CHIP/'+(session||'?');
+  teleRows.forEach(([k,v])=>{
+    const d=document.createElement('div');d.className='tr';
+    d.innerHTML=`<span class="k">${k}</span><span class="v">${v}</span>`;
+    box.appendChild(d);
+  });
+  const cpu=document.getElementById('g-cpu'),mem=document.getElementById('g-mem');
+  const vc=document.getElementById('v-cpu'),vm=document.getElementById('v-mem');
+  setInterval(()=>{
+    const c=20+Math.round(Math.random()*55),m=30+Math.round(Math.random()*30);
+    cpu.style.width=c+'%';mem.style.width=m+'%';
+    cpu.classList.toggle('hot',c>75);
+    vc.textContent=c+'%';vm.textContent=m+'%';
+  },1600);
+}
+
+/* ---------------- chat ---------------- */
+const feed=document.getElementById('feed');
+const log=document.getElementById('log');
+const input=document.getElementById('input');
+const sendBtn=document.getElementById('send');
+const arc=document.getElementById('arc');
+const coreState=document.getElementById('core-state');
+
+let session=localStorage.getItem('chip_session')||('chip-'+Math.random().toString(36).slice(2,8));
+localStorage.setItem('chip_session',session);
+drawTele(session);
+
+function who(msg){return msg.querySelector('.who').textContent;}
+
+function addMsg(role,text){
+  const box=document.createElement('div');
+  box.className='msg '+role+(role==='bot'?' typing':'');
+  box.innerHTML=`<div class="who">${role==='user'?'you //':'chip //'}</div><div class="body"></div>`;
+  const body=box.querySelector('.body');
+  body.textContent=text||'';
+  if(role==='bot'&&!text)body.innerHTML='<span class="caret">&#9610;</span>';
+  feed.appendChild(box);feed.scrollTop=feed.scrollHeight;
+  return body;
+}
+
+async function typeInto(el,text){
+  el.classList.contains('typing')&&el.classList.remove('typing');
+  el.textContent='';el.innerHTML='';
+  const caret=document.createElement('span');caret.className='caret';caret.textContent='▍';
+  el.appendChild(caret);
+  let i=0;const N=text.length;
+  const t0=Date.now();
+  while(i<N){
+    const target=Math.min(N,Math.floor((Date.now()-t0)*(N/1200)));
+    const seg=text.slice(i,target);
+    caret.before(document.createTextNode(seg));
+    i=target;
+    await new Promise(r=>setTimeout(r,12));
+  }
+  caret.remove();
+}
+
+let stepN=0;
+function addStep(step,i){
+  const args=document.createElement('div');
+  args.className='s-args';args.textContent=JSON.stringify(step.args||{});
+  const pre=document.createElement('div');pre.textContent=step.result||'';
+  const preWrap=document.createElement('pre');preWrap.appendChild(pre);
+  const d=document.createElement('div');d.className='step';
+  d.innerHTML=`<div class="s-head"><span class="s-n">TOOL #${i}${step.blocked?' · BLOCKED':''}</span><span>${step.name}</span></div>`;
+  if(step.blocked)d.style.borderColor='var(--magenta)';
+  d.appendChild(args);d.appendChild(preWrap);
+  log.appendChild(d);log.scrollTop=log.scrollHeight;
+}
+
+let busy=false;
+let curBotBody=null;
+
+function handleEvent(kind,data){
+  if(kind==='meta'){
+    session=data.session||session;localStorage.setItem('chip_session',session);
+  }else if(kind==='delta'){
+    curBotBody.parentElement.classList.remove('typing');
+    if(curBotBody.firstChild&&curBotBody.firstChild.classList&&
+       curBotBody.firstChild.classList.contains('caret'))curBotBody.removeChild(curBotBody.firstChild);
+    curBotBody.appendChild(document.createTextNode(data.text));
+    feed.scrollTop=feed.scrollHeight;
+  }else if(kind==='tool'){
+    stepN++;addStep(data,stepN);
+    curBotBody.parentElement.classList.remove('typing');
+  }else if(kind==='done'){
+    curBotBody.parentElement.classList.remove('typing');
+    const c=curBotBody.querySelector('.caret');if(c)c.remove();
+    if(!(curBotBody.textContent||'').trim()&&data.answer)curBotBody.textContent=data.answer;
+    speak(data.answer);
+  }else if(kind==='error'){
+    throw new Error(data.error);
+  }
+}
+
+async function chat(){
+  const msg=input.value.trim();if(!msg||busy)return;
+  busy=true;sendBtn.disabled=true;sendBtn.classList.add('sending');
+  sendBtn.textContent='◌ running';
+  if(rec){try{rec.stop();}catch(e){}}
+  stopSpeak();
+  arc.classList.add('sending');coreState.textContent='THINKING';
+  addMsg('user',msg);input.value='';
+  curBotBody=addMsg('bot','');
+  curBotBody.classList.remove('typing');
+  const caret=document.createElement('span');caret.className='caret';caret.textContent='▍';
+  curBotBody.appendChild(caret);
+  try{
+    const res=await fetch('/api/chat/stream',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        message:msg,session,mode,
+        model:modelSel.value==='(default)'?'' : modelSel.value
+      })
+    });
+    if(!res.ok){const d=await res.json().catch(()=>({}));throw new Error(d.error||res.status);}
+    const reader=res.body.getReader();
+    const decoder=new TextDecoder();
+    let buf='';
+    while(true){
+      const {value,done}=await reader.read();
+      buf+=decoder.decode(value||new Uint8Array(),{stream:!done});
+      let idx;
+      while((idx=buf.indexOf('\n\n'))!==-1){
+        const frame=buf.slice(0,idx);buf=buf.slice(idx+2);
+        const evLine=frame.split('\n').find(l=>l.startsWith('event:'));
+        const dataLine=frame.split('\n').find(l=>l.startsWith('data:'));
+        if(evLine&&dataLine)handleEvent(evLine.slice(7).trim(),JSON.parse(dataLine.slice(5).trim()));
+      }
+      if(done)break;
+    }
+  }catch(errMsg){
+    curBotBody.parentElement.classList.remove('typing');
+    curBotBody.innerHTML='';
+    curBotBody.textContent='⚠ '+errMsg;
+  }finally{
+    busy=false;sendBtn.disabled=false;sendBtn.classList.remove('sending');
+    sendBtn.textContent='▶ send';arc.classList.remove('sending');
+    coreState.textContent='ONLINE';input.focus();
+  }
+}
+
+/* ---------------- plan / build mode (Tab) ---------------- */
+let mode='build';
+const modeboxEl=document.getElementById('modebox');
+const modeState=document.getElementById('mode-state');
+function setMode(m){
+  mode=m;modeboxEl.className='modebox '+m;
+  modeState.textContent=(m==='plan'?'PLAN MODE':'BUILD MODE');
+  document.body.classList.toggle('plan',m==='plan');
+  coreState.textContent=m==='plan'?'PLANNING':'ONLINE';
+}
+addEventListener('keydown',e=>{
+  if(e.key==='Tab'&&!e.metaKey&&!e.ctrlKey&&!e.shiftKey&&!e.altKey){
+    e.preventDefault();setMode(mode==='plan'?'build':'plan');
+  }
+});
+modeboxEl.addEventListener('click',()=>setMode(mode==='plan'?'build':'plan'));
+
+/* ---------------- model picker ---------------- */
+const modelSel=document.getElementById('model-sel');
+(async function loadModels(){
+  try{
+    const res=await fetch('/api/models');
+    const data=await res.json();
+    const saved=localStorage.getItem('chip_model');
+    const list=data.models||[];
+    modelSel.innerHTML='';
+    modelSel.add(new Option('(default)','(default)'));
+    (list.includes(saved)?[saved,...list.filter(m=>m!==saved)]:list)
+      .forEach(m=>modelSel.add(new Option(m,m)));
+    if(saved&&list.includes(saved))modelSel.value=saved;
+  }catch(e){
+    modelSel.innerHTML='<option value="(default)">(default)</option>';
+  }
+})();
+modelSel.addEventListener('change',()=>{
+  if(modelSel.value==='(default)')localStorage.removeItem('chip_model');
+  else localStorage.setItem('chip_model',modelSel.value);
+});
+
+sendBtn.addEventListener('click',chat);
+input.addEventListener('keydown',e=>{if(e.key==='Enter')chat();});
+
+/* ---------------- flash toast ---------------- */
+function flash(msg){
+  const el=document.createElement('div');el.className='flash';el.textContent=msg;
+  document.body.appendChild(el);
+  setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),400);},2600);
+}
+
+/* ---------------- voice IN (speech-to-text, mic) ---------------- */
+const micBtn=document.getElementById('mic');
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null;
+function startMic(){
+  if(!SR){flash('MIC unsupported by this browser — use Chrome/Edge, or disable Brave Shields');return;}
+  if(busy){flash('wait for the current task');return;}
+  if(rec){try{rec.stop();}catch(e){}return;}
+  rec=new SR();
+  rec.lang='en-US';rec.interimResults=true;rec.continuous=false;rec.maxAlternatives=1;
+  rec.onresult=e=>{
+    let t='';
+    for(let i=e.resultIndex;i<e.results.length;i++)t+=e.results[i][0].transcript;
+    input.value=t;
+  };
+  rec.onend=()=>{
+    const wasListening=micBtn.classList.contains('listening');
+    micBtn.classList.remove('listening','on');micBtn.innerHTML='&#9677; mic';
+    const t=input.value.trim();rec=null;
+    if(wasListening&&t)chat();
+  };
+  rec.onerror=r=>{
+    micBtn.classList.remove('listening','on');micBtn.innerHTML='&#9677; mic';
+    rec=null;
+    if(r.error==='not-allowed')flash('Mic permission denied');
+    else if(r.error==='no-speech')flash('no speech detected');
+  };
+  try{
+    rec.start();micBtn.classList.add('listening','on');micBtn.textContent='……';
+  }catch(e){rec=null;micBtn.classList.remove('listening','on');}
+}
+micBtn.addEventListener('click',startMic);
+
+/* ---------------- voice OUT (text-to-speech) ---------------- */
+const voiceBtn=document.getElementById('voice');
+let speakOn=localStorage.getItem('chip_speak')!=='off';
+function refreshVoiceBtn(){
+  voiceBtn.classList.toggle('on',speakOn);
+  voiceBtn.textContent=speakOn?'vox on':'vox off';
+}
+voiceBtn.addEventListener('click',()=>{
+  speakOn=!speakOn;localStorage.setItem('chip_speak',speakOn?'on':'off');
+  refreshVoiceBtn();
+  stopSpeak();
+  flash(speakOn?'voice replies on':'voice replies off');
+});
+refreshVoiceBtn();
+
+const synthOK=typeof speechSynthesis!=='undefined';
+let voicesReady=false;
+const ttsAudio=new Audio();
+function stopSpeak(){
+  try{ttsAudio.pause();ttsAudio.removeAttribute('src');}catch(e){}
+  if(synthOK)speechSynthesis.cancel();
+}
+function refreshVoices(){if(synthOK)voicesReady=speechSynthesis.getVoices().length>0;}
+if(synthOK){refreshVoices();speechSynthesis.onvoiceschanged=refreshVoices;}
+
+function browserSpeak(text){
+  if(!synthOK)return false;
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text);
+    u.lang='en-US';u.rate=1.05;u.pitch=0.95;
+    const vs=speechSynthesis.getVoices();
+    const v=vs.find(v=>/en[-_](US|GB)/i.test(v.lang))||vs.find(v=>v.default);
+    if(v)u.voice=v;
+    speechSynthesis.speak(u);
+    return true;
+  }catch(e){return false;}
+}
+function serverSpeak(text){
+  try{
+    stopSpeak();
+    ttsAudio.src='/api/tts?text='+encodeURIComponent(text.slice(0,220));
+    ttsAudio.play().catch(()=>flash('TTS unavailable'));
+  }catch(e){flash('TTS unavailable');}
+}
+function speak(text){
+  if(!speakOn||!text)return;
+  const clean=text.replace(/[#*_`~|>]|```[^`]*```/g,'');
+  if(!clean.trim())return;
+  if(voicesReady&&browserSpeak(clean))return;
+  serverSpeak(clean);
+}
+
+/* ---------------- boot sequence ---------------- */
+(async function boot(){
+  if(!SR)flash('MIC: unsupported here — Brave Shields often block speech-to-text; try Chrome/Edge');
+  coreState.textContent='BOOTING';
+  await new Promise(r=>setTimeout(r,400));
+  coreState.textContent='LOADING TOOLS';
+  await new Promise(r=>setTimeout(r,400));
+  coreState.textContent='ONLINE';
+  await new Promise(r=>setTimeout(r,350));
+  const welcome=addMsg('bot','');
+  const caret=document.createElement('span');caret.className='caret';caret.textContent='▍';
+  welcome.appendChild(caret);
+  const t='Welcome back, sir. CHIP arc reactor operational — all systems nominal. How may I assist you?';
+  for(const ch of t){welcome.appendChild(document.createTextNode(ch));await new Promise(r=>setTimeout(r,14));}
+  const c=welcome.querySelector('.caret');if(c)c.remove();
+  input.focus();
+})();
+</script>
+</body>
+</html>
