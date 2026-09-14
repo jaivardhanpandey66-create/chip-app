@@ -246,7 +246,34 @@ def get_api_key():
     return ""
 
 
+GEM_KEY_FILE = os.path.expanduser("~/.config/gemini/key")
+GEM_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
+GEM_MODELS = ["gemini-3.5-flash-lite", "gemini-3.5-flash"]
+
+
+def get_gemini_key():
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if key:
+        return key
+    if os.path.exists(GEM_KEY_FILE):
+        return open(GEM_KEY_FILE).read().strip()
+    return ""
+
+
+def on_gemini():
+    return bool(get_gemini_key())
+
+
+def get_model():
+    if on_gemini():
+        return GEM_MODELS[0]
+    return MODEL
+
+
 def make_client(model=None):
+    if on_gemini():
+        key = get_gemini_key()
+        return OpenAI(base_url=GEM_BASE, api_key=key, timeout=180), model or GEM_MODELS[0]
     key = get_api_key()
     if not key:
         raise RuntimeError("No API key. Set OPENROUTER_API_KEY or save it in %s" % CONFIG_DIR)
@@ -923,7 +950,7 @@ def agent_generate(client, messages, mode="build", depth=0, max_steps=None,
     max_steps = max_steps or MAX_STEPS
     tools = tools or TOOLS
     temperature = temperature if temperature is not None else TEMPERATURE
-    model = model or MODEL
+    model = model or get_model()
     used = 0
     while used < max_steps:
         content = ""
@@ -1136,7 +1163,7 @@ class Handler(BaseHTTPRequestHandler):
             NATIVE.nn_sess_stats(ctypes.byref(s_items), ctypes.byref(s_bytes))
             self._json({
                 "native": True, "rust": RS_CORE, "rust_version": rsver,
-                "context_budget": CONTEXT_BUDGET, "model": MODEL,
+                "context_budget": CONTEXT_BUDGET, "model": get_model(),
                 "links": {"cortex": bool(_cortex_live()),
                           "cortex_url": CORTEX_URL if _MEM_STATE["cortex"] else None,
                           "stark": bool(_stark_live()),
@@ -1151,7 +1178,7 @@ class Handler(BaseHTTPRequestHandler):
             with SESSION_LOCK:
                 self._json({
                     "native": False, "rust": RS_CORE, "rust_version": rsver,
-                    "context_budget": CONTEXT_BUDGET, "model": MODEL,
+                    "context_budget": CONTEXT_BUDGET, "model": get_model(),
                     "links": {"cortex": bool(_cortex_live()),
                               "cortex_url": CORTEX_URL if _MEM_STATE["cortex"] else None,
                               "stark": bool(_stark_live()),
@@ -1180,6 +1207,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         if path == "/api/models":
+            if on_gemini():
+                self._json({"models": GEM_MODELS, "default": GEM_MODELS[0]})
+                return
             try:
                 client, _ = make_client()
                 ids = fetch_models(client)
@@ -1242,7 +1272,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         session_key = (data.get("session") or "default")[:100]
         mode = data.get("mode") if data.get("mode") in ("plan", "build") else "build"
-        model = (data.get("model") or "").strip() or MODEL[:]
+        model = (data.get("model") or "").strip() or get_model()
         try:
             client, model = make_client(model)
         except Exception as e:
